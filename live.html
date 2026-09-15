@@ -1,19 +1,6 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Building a Claude Second Brain</title>
 <meta name="description" content="A setup guide for replicating a Claude Code + Obsidian second-brain workflow">
-<meta name="robots" content="noindex, nofollow">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%A7%A0</text></svg>">
-<style>
-  *, *::before, *::after { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
-  body { margin: 0; font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  img { max-width: 100%; }
-  [hidden] { display: none !important; }
-</style>
+
 <style>
   :root {
     --paper: #f2efe7;
@@ -159,8 +146,6 @@
   }
   @keyframes rise { from { opacity: 0; } to { opacity: 1; } }
 </style>
-</head>
-<body>
 
 <div class="gate" id="gate">
   <div class="gate-card">
@@ -191,28 +176,13 @@
 <script>
 (function () {
   var KEY = "sb-guide-pass";
+  var data = JSON.parse(document.getElementById("payload").textContent);
   var gate = document.getElementById("gate");
   var doc = document.getElementById("doc");
   var form = document.getElementById("form");
   var input = document.getElementById("pass");
   var go = document.getElementById("go");
   var msg = document.getElementById("msg");
-  var data;
-
-  function say(text, isError) {
-    msg.textContent = text;
-    msg.classList.toggle("is-error", !!isError);
-  }
-
-  function fail(where, err) {
-    say("Something went wrong loading this page (" + where + "). Reload and try again.", true);
-    if (go) go.disabled = false;
-    if (window.console) console.error("[gate] " + where, err);
-  }
-
-  try {
-    data = JSON.parse(document.getElementById("payload").textContent);
-  } catch (err) { fail("bad payload", err); return; }
 
   function b2a(b64) {
     var s = atob(b64), n = new Uint8Array(s.length);
@@ -220,12 +190,9 @@
     return n;
   }
 
-  function reveal(text) {
-    doc.innerHTML = text;
-    doc.hidden = false;
-    // Remove the gate outright rather than trusting [hidden] to beat .gate{display:flex}
-    if (gate && gate.parentNode) gate.parentNode.removeChild(gate);
-    window.scrollTo(0, 0);
+  function say(text, isError) {
+    msg.textContent = text;
+    msg.classList.toggle("is-error", !!isError);
   }
 
   async function unlock(raw) {
@@ -236,35 +203,37 @@
       say("This browser can't unlock the page. Try Safari, Chrome, or Firefox.", true);
       return false;
     }
+    var material = await subtle.importKey(
+      "raw", new TextEncoder().encode(pass), "PBKDF2", false, ["deriveKey"]
+    );
+    var key = await subtle.deriveKey(
+      { name: "PBKDF2", salt: b2a(data.salt), iterations: data.iter, hash: "SHA-256" },
+      material, { name: "AES-GCM", length: 256 }, false, ["decrypt"]
+    );
     var plain;
     try {
-      var material = await subtle.importKey(
-        "raw", new TextEncoder().encode(pass), "PBKDF2", false, ["deriveKey"]
-      );
-      var key = await subtle.deriveKey(
-        { name: "PBKDF2", salt: b2a(data.salt), iterations: data.iter, hash: "SHA-256" },
-        material, { name: "AES-GCM", length: 256 }, false, ["decrypt"]
-      );
       plain = await subtle.decrypt({ name: "AES-GCM", iv: b2a(data.iv) }, key, b2a(data.ct));
-    } catch (err) {
+    } catch (e) {
       return false;
     }
-    reveal(new TextDecoder().decode(plain));
-    try { localStorage.setItem(KEY, pass); } catch (err) {}
+    doc.innerHTML = new TextDecoder().decode(plain);
+    gate.hidden = true;
+    doc.hidden = false;
+    document.title = "Building a Claude Second Brain";
+    try { localStorage.setItem(KEY, pass); } catch (e) {}
     return true;
   }
 
-  form.addEventListener("submit", function (e) {
+  form.addEventListener("submit", async function (e) {
     e.preventDefault();
     go.disabled = true;
-    say("Unlocking\u2026", false);
-    unlock(input.value).then(function (ok) {
-      if (!ok) {
-        go.disabled = false;
-        say("That passcode doesn't match. Check for typos; case and spacing don't matter.", true);
-        input.select();
-      }
-    }, function (err) { fail("unlock error", err); });
+    say("Unlocking…", false);
+    var ok = await unlock(input.value);
+    if (!ok) {
+      go.disabled = false;
+      say("That passcode doesn't match. Check for typos — case and spacing don't matter.", true);
+      input.select();
+    }
   });
 
   input.addEventListener("input", function () {
@@ -272,15 +241,13 @@
   });
 
   var saved = null;
-  try { saved = localStorage.getItem(KEY); } catch (err) {}
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
   if (saved) {
     unlock(saved).then(function (ok) {
-      if (!ok) { try { localStorage.removeItem(KEY); } catch (err) {} input.focus(); }
-    }, function () { input.focus(); });
+      if (!ok) { try { localStorage.removeItem(KEY); } catch (e) {} }
+    });
   } else {
     input.focus();
   }
 })();
 </script>
-</body>
-</html>
